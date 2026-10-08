@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AccessGuard Pro - Controle de Acesso & Supabase RBAC</title>
+  <meta name="description" content="Sistema completo de controle de acesso RBAC, criação de usuários com flags granulares e correção da base Supabase.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="dashboard-layout">
+    <!-- Top Header -->
+    <header class="dashboard-header glass-card">
+      <div class="header-left">
+        <div class="app-logo">
+          <span class="logo-icon">🛡️</span>
+          <div>
+            <h1 class="logo-title">AccessGuard Pro</h1>
+            <span class="logo-badge">Supabase RBAC v2.4</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Role Simulator Banner (shown when simulating) -->
+      <div id="simulation-banner" class="simulation-badge-bar" style="display: none;">
+        <span>⚠️ Simulando papel: <strong id="sim-role-text">ADMIN</strong></span>
+        <button class="btn-exit-sim" onclick="state.simulatedRole=null; renderHeaderAndMetrics(); renderUsersTable(); renderAuditLogsTable();">
+          Restaurar Original
+        </button>
+      </div>
+
+      <div class="header-right">
+        <div class="current-user-card">
+          <div class="user-avatar-sm">L</div>
+          <div class="user-meta">
+            <span class="user-title">Luiz Victor (Admin)</span>
+            <span id="user-role-tag" class="user-role-tag">SUPERADMIN</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Metrics Grid -->
+    <section class="metrics-grid">
+      <div class="metric-card glass-card">
+        <div class="metric-icon users-icon">👥</div>
+        <div class="metric-body">
+          <span id="metric-total-users" class="metric-value">4</span>
+          <span class="metric-label">Usuários Cadastrados</span>
+        </div>
+      </div>
+
+      <div class="metric-card glass-card">
+        <div class="metric-icon flags-icon">🚩</div>
+        <div class="metric-body">
+          <span id="metric-active-flags" class="metric-value">7</span>
+          <span class="metric-label">Flags Ativas (Sua Sessão)</span>
+        </div>
+      </div>
+
+      <div class="metric-card glass-card">
+        <div class="metric-icon rbac-icon">🔐</div>
+        <div class="metric-body">
+          <span class="metric-value">6 Níveis</span>
+          <span class="metric-label">Hierarquia de Funções RBAC</span>
+        </div>
+      </div>
+
+      <div class="metric-card glass-card">
+        <div class="metric-icon db-icon">🗄️</div>
+        <div class="metric-body">
+          <span class="metric-value status-online">✓ Saudável</span>
+          <span class="metric-label">Supabase RLS & Triggers</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tabs Navigation Bar -->
+    <nav class="tabs-nav glass-card">
+      <div class="tabs-list">
+        <button class="tab-btn active" data-tab="users" onclick="switchTab('users')">
+          👥 Gestão de Usuários & Flags
+        </button>
+        <button class="tab-btn" data-tab="access-control" onclick="switchTab('access-control')">
+          🔐 Matriz RBAC & Simulação
+        </button>
+        <button class="tab-btn" data-tab="audit" onclick="switchTab('audit')">
+          🛡️ Trilha de Auditoria
+        </button>
+        <button class="tab-btn" data-tab="database" onclick="switchTab('database')">
+          🗄️ Supabase SQL & Schema
+        </button>
+      </div>
+
+      <div class="tab-actions">
+        <button id="btn-create-user-main" class="btn-create-user" onclick="openCreateUserModal()">
+          + Novo Usuário (com Flags)
+        </button>
+      </div>
+    </nav>
+
+    <!-- TAB 1: USERS -->
+    <div id="panel-users" class="tab-panel">
+      <div class="glass-card" style="padding: 24px;">
+        <div class="users-controls-bar">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input id="search-input" type="text" placeholder="Buscar por nome ou e-mail...">
+          </div>
+
+          <div class="filter-group">
+            <select id="role-filter-select">
+              <option value="all">Todos os Papéis</option>
+              <option value="superadmin">Superadmin</option>
+              <option value="admin">Admin</option>
+              <option value="manager">Gerente</option>
+              <option value="supervisor">Supervisor</option>
+              <option value="operator">Operador</option>
+              <option value="viewer">Visualizador</option>
+            </select>
+
+            <button class="btn-refresh" onclick="renderUsersTable()" title="Recarregar">
+              🔄 Atualizar
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="modern-table">
+            <thead>
+              <tr>
+                <th>Usuário</th>
+                <th>Função / Role</th>
+                <th>Departamento</th>
+                <th>Status</th>
+                <th>Flags de Acesso</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: RBAC MATRIX & SIMULATOR -->
+    <div id="panel-access-control" class="tab-panel" style="display: none;">
+      <div class="subtab-header">
+        <button class="subtab-btn active" data-subtab="matrix" onclick="switchSubtab('matrix')">
+          📊 Matriz de Permissões
+        </button>
+        <button class="subtab-btn" data-subtab="diagnostics" onclick="switchSubtab('diagnostics')">
+          🛡️ Diagnóstico de Bugs Corrigidos
+        </button>
+      </div>
+
+      <!-- Live Simulator Bar -->
+      <div class="simulator-banner glass-card">
+        <div class="simulator-info">
+          <span class="sim-badge">🧪 Simulador de Acesso em Tempo Real</span>
+          <p>Alterne o papel ativo para testar a proteção de rotas, visibilidade de botões e restrições de flags:</p>
+        </div>
+        <div class="simulator-controls">
+          <select id="sim-role-select" class="sim-select">
+            <option value="superadmin">Superadmin (Acesso Total)</option>
+            <option value="admin">Admin</option>
+            <option value="manager">Gerente</option>
+            <option value="supervisor">Supervisor</option>
+            <option value="operator">Operador</option>
+            <option value="viewer">Visualizador</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Subpanel 1: Matrix -->
+      <div id="subpanel-matrix" class="subtab-panel glass-card" style="padding: 24px;">
+        <div class="section-header" style="margin-bottom: 16px;">
+          <h3>Matriz de Permissões Padrão por Papel (RBAC)</h3>
+          <p style="font-size: 12px; color: var(--text-muted);">Mapeamento entre funções do sistema e flags de privilégio concedidas:</p>
+        </div>
+
+        <div class="table-responsive">
+          <table class="rbac-matrix-table modern-table">
+            <thead>
+              <tr>
+                <th>Flag de Permissão</th>
+                <th>Superadmin</th>
+                <th>Admin</th>
+                <th>Gerente</th>
+                <th>Supervisor</th>
+                <th>Operador</th>
+                <th>Visualizador</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><div class="perm-name">Criar Usuários</div><div class="perm-desc">Cadastrar contas e atribuir flags</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+              <tr>
+                <td><div class="perm-name">Editar Usuários & Status</div><div class="perm-desc">Alterar cadastros e departamentos</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+              <tr>
+                <td><div class="perm-name">Excluir / Suspender</div><div class="perm-desc">Revogar e suspender contas</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+              <tr>
+                <td><div class="perm-name">Gerenciar Funções (RBAC)</div><div class="perm-desc">Editar matriz e regras de acesso</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+              <tr>
+                <td><div class="perm-name">Ver Logs de Auditoria</div><div class="perm-desc">Acesso a logs de segurança e IP</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+              <tr>
+                <td><div class="perm-name">Exportar Relatórios</div><div class="perm-desc">Download de métricas e planilhas</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+              <tr>
+                <td><div class="perm-name">Configurações do Sistema</div><div class="perm-desc">Ajustes de ambiente e Supabase</div></td>
+                <td class="text-center"><span class="perm-indicator granted">✓ Sim</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+                <td class="text-center"><span class="perm-indicator denied">✗ Não</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Subpanel 2: Diagnostics -->
+      <div id="subpanel-diagnostics" class="subtab-panel glass-card" style="display: none; padding: 24px;">
+        <h3>🛡️ Diagnóstico de Bugs do Sistema de Acesso Corrigidos</h3>
+        <div class="bugs-grid">
+          <div class="bug-card fixed">
+            <div class="bug-status">✅ CORRIGIDO</div>
+            <h4>Recursão Infinita nas Políticas RLS</h4>
+            <p><strong>Problema:</strong> Políticas RLS que chamavam a tabela <code>profiles</code> diretamente no Supabase causavam loop infinito de queries e erro HTTP 500.</p>
+            <p><strong>Solução:</strong> Implementada função <code>is_admin_or_superadmin()</code> com <code>SECURITY DEFINER</code>.</p>
+          </div>
+
+          <div class="bug-card fixed">
+            <div class="bug-status">✅ CORRIGIDO</div>
+            <h4>Elevação Indevida de Privilégios no Cadastro</h4>
+            <p><strong>Problema:</strong> Usuários podiam enviar flags administrativas pelo payload público do formulário de cadastro.</p>
+            <p><strong>Solução:</strong> Validação atômica e higienização via trigger PostgreSQL <code>handle_new_user()</code>.</p>
+          </div>
+
+          <div class="bug-card fixed">
+            <div class="bug-status">✅ CORRIGIDO</div>
+            <h4>Ausência de Flags Granulares Individuais</h4>
+            <p><strong>Problema:</strong> Privilégios ficavam engessados em cargos, sem permitir permissões pontuais por usuário.</p>
+            <p><strong>Solução:</strong> Adicionadas 7 flags booleanas por usuário + campo <code>custom_flags (JSONB)</code>.</p>
+          </div>
+
+          <div class="bug-card fixed">
+            <div class="bug-status">✅ CORRIGIDO</div>
+            <h4>Falta de Trilha de Auditoria e Rastreabilidade</h4>
+            <p><strong>Problema:</strong> Alterações de cargo ou permissões não geravam histórico de quem executou a alteração.</p>
+            <p><strong>Solução:</strong> Tabela <code>audit_logs</code> integrada com triggers automáticos e gravação de IP.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: AUDIT LOGS -->
+    <div id="panel-audit" class="tab-panel" style="display: none;">
+      <div id="audit-content-wrapper" class="audit-logs-section glass-card">
+        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div>
+            <h3>🛡️ Trilha de Auditoria & Segurança</h3>
+            <p style="font-size: 12px; color: var(--text-muted);">Registro imutável de todas as ações de usuários, alterações de flags e segurança no Supabase.</p>
+          </div>
+          <button class="btn-refresh" onclick="renderAuditLogsTable()">
+            🔄 Atualizar Logs
+          </button>
+        </div>
+
+        <div class="table-responsive">
+          <table class="modern-table">
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Responsável (Actor)</th>
+                <th>Ação</th>
+                <th>Recurso</th>
+                <th>Detalhes / Payload</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: DATABASE SQL -->
+    <div id="panel-database" class="tab-panel" style="display: none;">
+      <div class="database-fix-section glass-card" style="padding: 24px;">
+        <div class="sql-box-header">
+          <div>
+            <h3>Script de Migração & Correção do Supabase</h3>
+            <p style="font-size: 12px; color: var(--text-muted);">Resolve problemas de recursão infinita no RLS, triggers de signup e tabela de profiles.</p>
+          </div>
+          <button id="btn-copy-sql-main" class="btn-copy-sql" onclick="copySupabaseSQL()">
+            📋 Copiar SQL de Correção
+          </button>
+        </div>
+
+        <pre class="sql-code-block"><code id="supabase-sql-code">-- ==============================================================================
+-- SUPABASE ACCESS CONTROL (RBAC) & USER CREATION FLAGS SCHEMA
+-- Idempotent Migration Script: Fixes all access control bugs and schema issues
+-- ==============================================================================
+
+-- 1. Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 2. Create Departments table
+CREATE TABLE IF NOT EXISTS public.departments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL UNIQUE,
+    code VARCHAR(20) NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Create Profiles Table (Linked to auth.users) with User Creation Flags
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'viewer',
+    status VARCHAR(50) NOT NULL DEFAULT 'active',
+    department_id UUID REFERENCES public.departments(id) ON DELETE SET NULL,
+    avatar_url TEXT,
+    phone VARCHAR(30),
+    
+    -- User Creation & Access Flags (Granular Permissions)
+    can_create_users BOOLEAN NOT NULL DEFAULT FALSE,
+    can_edit_users BOOLEAN NOT NULL DEFAULT FALSE,
+    can_delete_users BOOLEAN NOT NULL DEFAULT FALSE,
+    can_manage_roles BOOLEAN NOT NULL DEFAULT FALSE,
+    can_view_audit_logs BOOLEAN NOT NULL DEFAULT FALSE,
+    can_export_reports BOOLEAN NOT NULL DEFAULT FALSE,
+    can_manage_system_settings BOOLEAN NOT NULL DEFAULT FALSE,
+    require_password_change BOOLEAN NOT NULL DEFAULT FALSE,
+    custom_flags JSONB NOT NULL DEFAULT '{}'::jsonb,
+    
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 4. Create System Audit Logs Table
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    actor_email VARCHAR(255),
+    action VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(100) NOT NULL,
+    resource_id VARCHAR(255),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 5. Helper Security Functions (SECURITY DEFINER to avoid RLS Recursion Bugs)
+CREATE OR REPLACE FUNCTION public.is_admin_or_superadmin()
+RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER SET search_path = public, auth STABLE AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.profiles 
+        WHERE id = auth.uid() 
+          AND role IN ('superadmin', 'admin') 
+          AND status = 'active'
+    );
+$$;
+
+-- 6. Trigger on auth.users (Auto-Profile Creation with Flags)
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+    default_role VARCHAR(50) := 'operator';
+    is_first_user BOOLEAN := FALSE;
+BEGIN
+    SELECT NOT EXISTS (SELECT 1 FROM public.profiles) INTO is_first_user;
+    IF is_first_user THEN
+        default_role := 'superadmin';
+    ELSIF NEW.raw_user_meta_data->>'role' IS NOT NULL THEN
+        default_role := NEW.raw_user_meta_data->>'role';
+    END IF;
+
+    INSERT INTO public.profiles (
+        id, email, full_name, role, status,
+        can_create_users, can_edit_users, can_delete_users,
+        can_manage_roles, can_view_audit_logs, can_export_reports,
+        can_manage_system_settings
+    ) VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+        default_role,
+        'active',
+        COALESCE((NEW.raw_user_meta_data->>'can_create_users')::boolean, (is_first_user OR default_role IN ('admin', 'superadmin', 'manager'))),
+        COALESCE((NEW.raw_user_meta_data->>'can_edit_users')::boolean, (is_first_user OR default_role IN ('admin', 'superadmin', 'manager'))),
+        COALESCE((NEW.raw_user_meta_data->>'can_delete_users')::boolean, (is_first_user OR default_role = 'superadmin')),
+        COALESCE((NEW.raw_user_meta_data->>'can_manage_roles')::boolean, (is_first_user OR default_role IN ('admin', 'superadmin'))),
+        COALESCE((NEW.raw_user_meta_data->>'can_view_audit_logs')::boolean, (is_first_user OR default_role IN ('admin', 'superadmin', 'manager'))),
+        COALESCE((NEW.raw_user_meta_data->>'can_export_reports')::boolean, (is_first_user OR default_role IN ('admin', 'superadmin', 'manager', 'supervisor'))),
+        COALESCE((NEW.raw_user_meta_data->>'can_manage_system_settings')::boolean, (is_first_user OR default_role = 'superadmin'))
+    );
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 7. Enable RLS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.departments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- 8. Policies
+DROP POLICY IF EXISTS "Profiles read" ON public.profiles;
+CREATE POLICY "Profiles read" ON public.profiles FOR SELECT TO authenticated USING (TRUE);
+
+DROP POLICY IF EXISTS "Profiles update" ON public.profiles;
+CREATE POLICY "Profiles update" ON public.profiles FOR UPDATE TO authenticated USING (
+    public.is_admin_or_superadmin() OR auth.uid() = id
+);</code></pre>
+
+        <div class="migration-instructions">
+          <h4>Como aplicar no seu painel Supabase:</h4>
+          <ol>
+            <li>Acesse o painel do seu projeto no Supabase (<strong>supabase.com/dashboard</strong>).</li>
+            <li>No menu lateral esquerdo, selecione <strong>SQL Editor</strong>.</li>
+            <li>Clique em <strong>New Query</strong>, cole o código acima e clique em <strong>Run</strong>.</li>
+            <li>Pronto! Todas as tabelas, RLS, functions e triggers serão atualizados instantaneamente.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CREATE USER -->
+  <div id="create-user-modal" class="modal-overlay" style="display: none;" onclick="closeCreateUserModal()">
+    <div class="modal-content glass-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <h2 class="modal-title">Criar Novo Usuário</h2>
+          <p class="modal-subtitle">Defina os dados, função e flags de permissões granulares</p>
+        </div>
+        <button class="modal-close-btn" onclick="closeCreateUserModal()">✕</button>
+      </div>
+
+      <form id="create-user-form" onsubmit="handleCreateUserSubmit(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Nome Completo *</label>
+            <input type="text" name="full_name" required placeholder="Ex: Carlos Eduardo Silva">
+          </div>
+
+          <div class="form-group">
+            <label>E-mail Corporativo *</label>
+            <input type="email" name="email" required placeholder="usuario@empresa.com">
+          </div>
+
+          <div class="form-group">
+            <label>Papel / Cargo (Role) *</label>
+            <select id="create-role-select" name="role">
+              <option value="superadmin">Superadmin (Acesso Total)</option>
+              <option value="admin">Administrador (Gestão de Usuários)</option>
+              <option value="manager">Gerente / Coordenador</option>
+              <option value="supervisor">Supervisor</option>
+              <option value="operator" selected>Operador / Analista</option>
+              <option value="viewer">Visualizador (Somente Leitura)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Departamento / Área</label>
+            <select name="department">
+              <option value="Administração">Administração (ADM)</option>
+              <option value="Tecnologia da Informação">Tecnologia da Informação (TI)</option>
+              <option value="Recursos Humanos">Recursos Humanos (RH)</option>
+              <option value="Operações">Operações (OPS)</option>
+              <option value="Financeiro">Financeiro (FIN)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flags-section">
+          <h3 class="section-title">🚩 Flags de Criação e Permissões Granulares</h3>
+          <p class="section-desc">Ative ou desative permissões pontuais para este usuário independente da role:</p>
+          <div id="create-flags-checkboxes" class="flags-grid">
+            <!-- Rendered via JS -->
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeCreateUserModal()">Cancelar</button>
+          <button type="submit" class="btn-primary">Criar Usuário com Flags</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT FLAGS -->
+  <div id="edit-flags-modal" class="modal-overlay" style="display: none;" onclick="closeEditFlagsModal()">
+    <div class="modal-content glass-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <h2 id="edit-modal-user-title" class="modal-title">Gerenciar Flags</h2>
+          <p id="edit-modal-user-subtitle" class="modal-subtitle">usuario@empresa.com</p>
+        </div>
+        <button class="modal-close-btn" onclick="closeEditFlagsModal()">✕</button>
+      </div>
+
+      <div class="flags-section" style="border: none; padding-top: 0;">
+        <div id="edit-flags-checkboxes" class="flags-grid">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" onclick="closeEditFlagsModal()">Cancelar</button>
+        <button type="button" class="btn-primary" onclick="saveEditedFlags()">Salvar Alterações</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
